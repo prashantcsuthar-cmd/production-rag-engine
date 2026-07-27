@@ -15,10 +15,21 @@ COLLECTION_NAME = "rag_documents"
 
 class RAGEngine:
     def __init__(self):
-        # Lazy load Hugging Face embedding model inside __init__ to prevent startup port-scan timeouts on Render
+        self.client = None
+        self.vector_store = None
+        self.storage_context = None
+        self.memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
+        self.chat_engine = None
+        self._is_initialized = False
+
+    def _ensure_initialized(self):
+        """Lazy load Hugging Face models and Qdrant client on first request to avoid deployment timeouts."""
+        if self._is_initialized:
+            return
+
         from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-        
-        print("Loading BAAI/bge-small-en-v1.5 embedding model...")
+
+        print("Lazy-loading local BAAI/bge-small-en-v1.5 embedding model...")
         Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
         Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
 
@@ -34,13 +45,11 @@ class RAGEngine:
 
         self.vector_store = QdrantVectorStore(client=self.client, collection_name=COLLECTION_NAME)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
-        
-        self.memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
-        self.chat_engine = None
+        self._is_initialized = True
         self._init_chat_engine()
 
     def _init_chat_engine(self):
-        """Loads index and connects the conversational memory chat engine."""
+        """Loads index and connects conversational memory."""
         try:
             index = VectorStoreIndex.from_vector_store(
                 vector_store=self.vector_store,
@@ -60,6 +69,7 @@ class RAGEngine:
 
     def ingest_file(self, file_path: str):
         """Processes and embeds a single file into Qdrant using local embeddings."""
+        self._ensure_initialized()
         documents = SimpleDirectoryReader(input_files=[file_path]).load_data()
         index = VectorStoreIndex.from_documents(
             documents,
@@ -70,6 +80,7 @@ class RAGEngine:
 
     def query(self, message: str):
         """Queries the engine and returns response along with detailed source metadata."""
+        self._ensure_initialized()
         if not self.chat_engine:
             self._init_chat_engine()
             if not self.chat_engine:
