@@ -1,11 +1,11 @@
 import os
-import shutil
 import qdrant_client
 from dotenv import load_dotenv
 
 from llama_index.core import Settings, StorageContext, VectorStoreIndex, SimpleDirectoryReader
 from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.chat_engine import CondensePlusContextChatEngine
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 
@@ -13,24 +13,11 @@ load_dotenv()
 
 COLLECTION_NAME = "rag_documents"
 
+
 class RAGEngine:
     def __init__(self):
-        self.client = None
-        self.vector_store = None
-        self.storage_context = None
-        self.memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
-        self.chat_engine = None
-        self._is_initialized = False
-
-    def _ensure_initialized(self):
-        """Lazy load Hugging Face models and Qdrant client on first request to avoid deployment timeouts."""
-        if self._is_initialized:
-            return
-
-        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-
-        print("Lazy-loading local BAAI/bge-small-en-v1.5 embedding model...")
-        Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        # Uses CPU-optimized sentence-transformers model
+        Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5", device="cpu")
         Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
 
         QDRANT_URL = os.getenv("QDRANT_URL")
@@ -45,7 +32,9 @@ class RAGEngine:
 
         self.vector_store = QdrantVectorStore(client=self.client, collection_name=COLLECTION_NAME)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
-        self._is_initialized = True
+
+        self.memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
+        self.chat_engine = None
         self._init_chat_engine()
 
     def _init_chat_engine(self):
@@ -68,8 +57,7 @@ class RAGEngine:
             self.chat_engine = None
 
     def ingest_file(self, file_path: str):
-        """Processes and embeds a single file into Qdrant using local embeddings."""
-        self._ensure_initialized()
+        """Processes and embeds a single file into Qdrant."""
         documents = SimpleDirectoryReader(input_files=[file_path]).load_data()
         index = VectorStoreIndex.from_documents(
             documents,
@@ -80,7 +68,6 @@ class RAGEngine:
 
     def query(self, message: str):
         """Queries the engine and returns response along with detailed source metadata."""
-        self._ensure_initialized()
         if not self.chat_engine:
             self._init_chat_engine()
             if not self.chat_engine:
@@ -90,7 +77,7 @@ class RAGEngine:
                 }
 
         response = self.chat_engine.chat(message)
-        
+
         sources = []
         if hasattr(response, "source_nodes"):
             for node in response.source_nodes:

@@ -10,7 +10,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
-rag_system = RAGEngine()
+rag_system = None
+
+
+@app.on_event("startup")
+def startup_event():
+    global rag_system
+    rag_system = RAGEngine()
 
 
 class ChatRequest(BaseModel):
@@ -25,16 +31,17 @@ def root():
 @app.post("/upload")
 def upload_pdf(file: UploadFile = File(...)):
     """Uploads a PDF, embeds it into Qdrant, and immediately cleans up local disk space."""
+    if not rag_system:
+        raise HTTPException(status_code=503, detail="RAG system is still starting up.")
+
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    # Create a temporary file location that auto-deletes
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file.file.read())
         temp_path = tmp.name
 
     try:
-        # Ingest into vector store
         num_docs = rag_system.ingest_file(temp_path)
         return {
             "status": "success",
@@ -44,7 +51,6 @@ def upload_pdf(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
-        # Guarantee local file deletion to save storage
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
@@ -52,6 +58,9 @@ def upload_pdf(file: UploadFile = File(...)):
 @app.post("/chat")
 def chat(request: ChatRequest):
     """Processes query with context and returns response with citations."""
+    if not rag_system:
+        raise HTTPException(status_code=503, detail="RAG system is still starting up.")
+
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
