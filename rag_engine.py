@@ -6,25 +6,25 @@ from dotenv import load_dotenv
 from llama_index.core import Settings, StorageContext, VectorStoreIndex, SimpleDirectoryReader
 from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.chat_engine import CondensePlusContextChatEngine
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 
 load_dotenv()
 
-# --- USE LOCAL BGE EMBEDDINGS (NO RATE LIMITS) ---
-Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
-
 COLLECTION_NAME = "rag_documents"
-
-# Check Qdrant Cloud environment variables vs local disk
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 class RAGEngine:
     def __init__(self):
-        # Support Qdrant Cloud if set, otherwise fall back to local disk
+        # Lazy load Hugging Face embedding model inside __init__ to prevent startup port-scan timeouts on Render
+        from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+        
+        print("Loading BAAI/bge-small-en-v1.5 embedding model...")
+        Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
+
+        QDRANT_URL = os.getenv("QDRANT_URL")
+        QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
         if QDRANT_URL and QDRANT_API_KEY:
             self.client = qdrant_client.QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
         else:
@@ -35,7 +35,6 @@ class RAGEngine:
         self.vector_store = QdrantVectorStore(client=self.client, collection_name=COLLECTION_NAME)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
         
-        # Memory buffer to remember last 10 conversational turns
         self.memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
         self.chat_engine = None
         self._init_chat_engine()
@@ -57,7 +56,6 @@ class RAGEngine:
                 )
             )
         except Exception:
-            # Index might be empty initially
             self.chat_engine = None
 
     def ingest_file(self, file_path: str):
@@ -82,7 +80,6 @@ class RAGEngine:
 
         response = self.chat_engine.chat(message)
         
-        # Extract source citations & metadata
         sources = []
         if hasattr(response, "source_nodes"):
             for node in response.source_nodes:
