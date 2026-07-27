@@ -12,11 +12,13 @@ app = FastAPI(
 
 rag_system = None
 
-
-@app.on_event("startup")
-def startup_event():
+def get_rag_system():
+    """Lazily initializes RAGEngine on first request so FastAPI binds port instantly."""
     global rag_system
-    rag_system = RAGEngine()
+    if rag_system is None:
+        print("Initializing RAGEngine...")
+        rag_system = RAGEngine()
+    return rag_system
 
 
 class ChatRequest(BaseModel):
@@ -31,18 +33,17 @@ def root():
 @app.post("/upload")
 def upload_pdf(file: UploadFile = File(...)):
     """Uploads a PDF, embeds it into Qdrant, and immediately cleans up local disk space."""
-    if not rag_system:
-        raise HTTPException(status_code=503, detail="RAG system is still starting up.")
-
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    engine = get_rag_system()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file.file.read())
         temp_path = tmp.name
 
     try:
-        num_docs = rag_system.ingest_file(temp_path)
+        num_docs = engine.ingest_file(temp_path)
         return {
             "status": "success",
             "filename": file.filename,
@@ -58,14 +59,13 @@ def upload_pdf(file: UploadFile = File(...)):
 @app.post("/chat")
 def chat(request: ChatRequest):
     """Processes query with context and returns response with citations."""
-    if not rag_system:
-        raise HTTPException(status_code=503, detail="RAG system is still starting up.")
-
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    engine = get_rag_system()
+
     try:
-        result = rag_system.query(request.message)
+        result = engine.query(request.message)
         return {
             "status": "success",
             "query": request.message,
