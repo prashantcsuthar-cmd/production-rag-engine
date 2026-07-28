@@ -1,29 +1,58 @@
 import os
+from typing import Any, List
 import qdrant_client
 from dotenv import load_dotenv
 
 from llama_index.core import Settings, StorageContext, VectorStoreIndex, SimpleDirectoryReader
+from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.chat_engine import CondensePlusContextChatEngine
-from llama_index.embeddings.huggingface_api import HuggingFaceInferenceAPIEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+
+from fastembed import TextEmbedding
+from pydantic import PrivateAttr
 
 load_dotenv()
 
 COLLECTION_NAME = "rag_documents"
 
 
+class CustomFastEmbed(BaseEmbedding):
+    """Custom FastEmbed wrapper to eliminate llama-index package conflicts & asyncio issues."""
+    _model: TextEmbedding = PrivateAttr()
+
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._model = TextEmbedding(model_name=model_name)
+
+    @classmethod
+    def class_name(cls) -> str:
+        return "CustomFastEmbed"
+
+    def _get_query_embedding(self, query: str) -> List[float]:
+        embeddings = list(self._model.query_embed([query]))
+        return embeddings[0].tolist()
+
+    async def _aget_query_embedding(self, query: str) -> List[float]:
+        return self._get_query_embedding(query)
+
+    def _get_text_embedding(self, text: str) -> List[float]:
+        embeddings = list(self._model.passage_embed([text]))
+        return embeddings[0].tolist()
+
+    def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        embeddings = list(self._model.passage_embed(texts))
+        return [e.tolist() for e in embeddings]
+
+    async def _aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return self._get_text_embeddings(texts)
+
+
 class RAGEngine:
     def __init__(self):
-        # Hosted free Hugging Face API — No local PyTorch & No Gemini 429 Quota limits
-        hf_token = os.getenv("HF_TOKEN")
-        
-        self.embed_model = HuggingFaceInferenceAPIEmbedding(
-            model_name="BAAI/bge-small-en-v1.5",
-            token=hf_token
-        )
-        Settings.embed_model = self.embed_model
+        # Local ONNX fast embedding without external package conflicts or API quotas
+        Settings.embed_model = CustomFastEmbed(model_name="BAAI/bge-small-en-v1.5")
         Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
 
         QDRANT_URL = os.getenv("QDRANT_URL")
