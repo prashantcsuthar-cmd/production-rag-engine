@@ -12,6 +12,7 @@ app = FastAPI(
 
 rag_system = None
 
+
 def get_rag_system():
     """Lazily initializes RAGEngine on first request so FastAPI binds port instantly."""
     global rag_system

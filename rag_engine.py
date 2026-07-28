@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from llama_index.core import Settings, StorageContext, VectorStoreIndex, SimpleDirectoryReader
 from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.chat_engine import CondensePlusContextChatEngine
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.embeddings.huggingface_api import HuggingFaceInferenceAPIEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 
@@ -16,8 +16,14 @@ COLLECTION_NAME = "rag_documents"
 
 class RAGEngine:
     def __init__(self):
-        # Uses CPU-optimized sentence-transformers model
-        Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5", device="cpu")
+        # Hosted free Hugging Face API — No local PyTorch & No Gemini 429 Quota limits
+        hf_token = os.getenv("HF_TOKEN")
+        
+        self.embed_model = HuggingFaceInferenceAPIEmbedding(
+            model_name="BAAI/bge-small-en-v1.5",
+            token=hf_token
+        )
+        Settings.embed_model = self.embed_model
         Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
 
         QDRANT_URL = os.getenv("QDRANT_URL")
