@@ -16,10 +16,10 @@ COLLECTION_NAME = "rag_documents"
 
 class RAGEngine:
     def __init__(self):
-        # 100% API-based: Zero local models loaded into RAM (<50MB memory total)
+        # Clean Google GenAI embedding identifier without "models/" prefix
         Settings.embed_model = GoogleGenAIEmbedding(
-            model_name="models/text-embedding-004",
-            embed_batch_size=1  # Batch size 1 to prevent rate limits
+            model_name="text-embedding-004",
+            embed_batch_size=1
         )
         Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
 
@@ -29,7 +29,7 @@ class RAGEngine:
         if QDRANT_URL and QDRANT_API_KEY:
             self.client = qdrant_client.QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
         else:
-            # Ultra-lightweight in-memory vector storage
+            # In-memory storage for minimal RAM footprint
             self.client = qdrant_client.QdrantClient(":memory:")
 
         self.vector_store = QdrantVectorStore(client=self.client, collection_name=COLLECTION_NAME)
