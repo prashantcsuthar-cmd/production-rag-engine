@@ -16,21 +16,15 @@ COLLECTION_NAME = "rag_documents"
 
 class RAGEngine:
     def __init__(self):
-        # Default embedding model for llama-index-embeddings-google-genai
+        # Increased embed_batch_size to 100 for fast local execution & zero rate limits
         Settings.embed_model = GoogleGenAIEmbedding(
             model_name="gemini-embedding-2-preview",
-            embed_batch_size=1
+            embed_batch_size=100
         )
         Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
 
-        QDRANT_URL = os.getenv("QDRANT_URL")
-        QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-
-        if QDRANT_URL and QDRANT_API_KEY:
-            self.client = qdrant_client.QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-        else:
-            # Minimal memory footprint storage for free hosting
-            self.client = qdrant_client.QdrantClient(":memory:")
+        # Local disk storage for Qdrant on your machine
+        self.client = qdrant_client.QdrantClient(path="./qdrant_data")
 
         self.vector_store = QdrantVectorStore(client=self.client, collection_name=COLLECTION_NAME)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
@@ -59,11 +53,12 @@ class RAGEngine:
             self.chat_engine = None
 
     def ingest_file(self, file_path: str):
-        """Processes and embeds a single file into Qdrant."""
+        """Processes and embeds a single file into local Qdrant."""
         documents = SimpleDirectoryReader(input_files=[file_path]).load_data()
         index = VectorStoreIndex.from_documents(
             documents,
-            storage_context=self.storage_context
+            storage_context=self.storage_context,
+            show_progress=True
         )
         self._init_chat_engine()
         return len(documents)
