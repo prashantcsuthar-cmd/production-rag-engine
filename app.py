@@ -1,9 +1,7 @@
 import streamlit as st
 import requests
-import os
 
-# Dynamic API URL configuration
-API_URL = st.secrets.get("BACKEND_URL", os.getenv("BACKEND_URL", "http://127.0.0.1:8000"))
+API_URL = "http://127.0.0.1:8000"
 
 # Page Configuration
 st.set_page_config(
@@ -68,7 +66,7 @@ with st.sidebar:
     # System Status Card
     st.subheader("⚙️ System Status")
     try:
-        health = requests.get(API_URL, timeout=5).json()
+        health = requests.get(API_URL, timeout=2).json()
         st.success("🟢 REST API: ONLINE")
     except Exception:
         st.error("🔴 REST API: OFFLINE")

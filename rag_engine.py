@@ -1,4 +1,5 @@
 import os
+import shutil
 import qdrant_client
 from dotenv import load_dotenv
 
@@ -11,30 +12,30 @@ from llama_index.vector_stores.qdrant import QdrantVectorStore
 
 load_dotenv()
 
+# Initialize Models
+Settings.embed_model = GoogleGenAIEmbedding(model_name="gemini-embedding-001")
+# Change this line:
+Settings.llm = GoogleGenAI(model="gemini-3.6-flash")
+
 COLLECTION_NAME = "rag_documents"
+QDRANT_PATH = "./qdrant_data"
+DATA_DIR = "./data"
 
 
 class RAGEngine:
     def __init__(self):
-        # Increased embed_batch_size to 100 for fast local execution & zero rate limits
-        Settings.embed_model = GoogleGenAIEmbedding(
-            model_name="gemini-embedding-2-preview",
-            embed_batch_size=100
-        )
-        Settings.llm = GoogleGenAI(model="models/gemini-2.5-flash")
-
-        # Local disk storage for Qdrant on your machine
-        self.client = qdrant_client.QdrantClient(path="./qdrant_data")
-
+        os.makedirs(DATA_DIR, exist_ok=True)
+        self.client = qdrant_client.QdrantClient(path=QDRANT_PATH)
         self.vector_store = QdrantVectorStore(client=self.client, collection_name=COLLECTION_NAME)
         self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
-
+        
+        # Memory buffer to remember last 10 conversational turns
         self.memory = ChatMemoryBuffer.from_defaults(token_limit=3900)
         self.chat_engine = None
         self._init_chat_engine()
 
     def _init_chat_engine(self):
-        """Loads index and connects conversational memory."""
+        """Loads index and connects the conversational memory chat engine."""
         try:
             index = VectorStoreIndex.from_vector_store(
                 vector_store=self.vector_store,
@@ -50,15 +51,15 @@ class RAGEngine:
                 )
             )
         except Exception:
+            # Index might be empty initially
             self.chat_engine = None
 
     def ingest_file(self, file_path: str):
-        """Processes and embeds a single file into local Qdrant."""
+        """Processes and embeds a single file into Qdrant."""
         documents = SimpleDirectoryReader(input_files=[file_path]).load_data()
         index = VectorStoreIndex.from_documents(
             documents,
-            storage_context=self.storage_context,
-            show_progress=True
+            storage_context=self.storage_context
         )
         self._init_chat_engine()
         return len(documents)
@@ -74,16 +75,16 @@ class RAGEngine:
                 }
 
         response = self.chat_engine.chat(message)
-
+        
+        # Extract source citations & metadata
         sources = []
-        if hasattr(response, "source_nodes"):
-            for node in response.source_nodes:
-                sources.append({
-                    "file_name": node.metadata.get("file_name", "Unknown File"),
-                    "page_label": node.metadata.get("page_label", "N/A"),
-                    "score": round(node.score, 3) if node.score else None,
-                    "text_snippet": node.node.get_content()[:200] + "..."
-                })
+        for node in response.source_nodes:
+            sources.append({
+                "file_name": node.metadata.get("file_name", "Unknown File"),
+                "page_label": node.metadata.get("page_label", "N/A"),
+                "score": round(node.score, 3) if node.score else None,
+                "text_snippet": node.node.get_content()[:200] + "..."
+            })
 
         return {
             "answer": response.response,

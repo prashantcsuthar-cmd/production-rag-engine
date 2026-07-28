@@ -10,16 +10,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-rag_system = None
-
-
-def get_rag_system():
-    """Lazily initializes RAGEngine on first request so FastAPI binds port instantly."""
-    global rag_system
-    if rag_system is None:
-        print("Initializing RAGEngine...")
-        rag_system = RAGEngine()
-    return rag_system
+rag_system = RAGEngine()
 
 
 class ChatRequest(BaseModel):
@@ -37,14 +28,14 @@ def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    engine = get_rag_system()
-
+    # Create a temporary file location that auto-deletes
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file.file.read())
         temp_path = tmp.name
 
     try:
-        num_docs = engine.ingest_file(temp_path)
+        # Ingest into vector store
+        num_docs = rag_system.ingest_file(temp_path)
         return {
             "status": "success",
             "filename": file.filename,
@@ -53,6 +44,7 @@ def upload_pdf(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
     finally:
+        # Guarantee local file deletion to save storage
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
@@ -63,10 +55,8 @@ def chat(request: ChatRequest):
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    engine = get_rag_system()
-
     try:
-        result = engine.query(request.message)
+        result = rag_system.query(request.message)
         return {
             "status": "success",
             "query": request.message,
